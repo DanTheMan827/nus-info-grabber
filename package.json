@@ -1,0 +1,30 @@
+{
+  "name": "nus-info-grabber",
+  "version": "1.0.0",
+  "description": "Download metadata from NUS.",
+  "main": "index.js",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanTheMan827/nus-info-grabber.git"
+  },
+  "keywords": [
+    "Nintendo",
+    "NUS",
+    "Metadata",
+    "Grabber"
+  ],
+  "author": "Daniel Radtke",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/DanTheMan827/nus-info-grabber/issues"
+  },
+  "homepage": "https://github.com/DanTheMan827/nus-info-grabber#readme",
+  "dependencies": {
+    "async": "^2.1.2",
+    "html-to-text": "^2.1.3",
+    "merge": "^1.2.0",
+    "xml2js": "^0.4.17",
+    "yargs": "^6.3.0"
+  }
+}
