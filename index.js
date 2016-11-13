@@ -169,6 +169,7 @@ var samuraiTitleQueue = async.queue((input, callback) => {
     };
     console.log(input.language + " > " + input.eshop_id)
     var ninjaAttempts = 0;
+    var samuraiAttempts = 0;
     
     async.parallel([
         function(callback){
@@ -198,7 +199,9 @@ var samuraiTitleQueue = async.queue((input, callback) => {
             
         },
         function(callback){
+            var samuraiFetch = arguments.callee;
             https.get("https://samurai.ctr.shop.nintendo.net/samurai/ws/" + input.language + "/title/" + input.eshop_id + "/?shop_id=2", (res) => {
+                samuraiAttempts++;
                 var data = '';
                 res.on('data', (d) => {
                     data += d;
@@ -208,7 +211,12 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                     var parser = new xml2js.Parser();
                     parser.parseString(data, (err, result) => {
                         if(err){
-                            callback(err);
+                            if(samuraiAttempts < 6){
+                                samuraiFetch(callback);
+                            } else {
+                                callback(err);
+                            }
+                            
                         } else {
                             var titleInfo = firstOrNone(result.eshop.title)
                             
@@ -265,7 +273,13 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                         }
                     })
                 });
-            }).on('error', callback).end();
+            }).on('error', (err) => {
+                if(samuraiAttempts < 6){
+                    samuraiFetch(callback);
+                } else {
+                    callback(err);
+                }
+            }).end();
         }
     ], () => {
         if(info.title_id != null){
