@@ -5,7 +5,7 @@ const http = require("http"),
       util = require('util'),
       cwd = process.cwd(),
       fs = require('fs'),
-      merge = require('merge'),
+      extend = require('extend'),
       async = require('async'),
       StringDecoder = require('string_decoder').StringDecoder,
       decoder = new StringDecoder('utf8'),
@@ -18,7 +18,7 @@ const http = require("http"),
       };
 
 var languages = [],
-    titleIDs = parseJsonFile(cwd + "/title-ids.json") || {},
+    titleIDs = parseJsonFile(cwd + "/titles.json") || {},
     titleData = parseJsonFile(cwd + "/complete.json") || {},
     deviceTypes = [],
     publishers = parseJsonFile(cwd + "/publishers.json") || {},
@@ -109,7 +109,7 @@ function handleSamuraiPublisherPlatformList(lang, type){
                 var parser = new xml2js.Parser();
                 parser.parseString(data, (err, result) => {
                     if(!err){
-                        console.log(type + "s for " + lang);
+                        console.log(lang + " > " + type + "s");
                         for(var i = 0, iLength = parseInt(result.eshop[type + "s"][0]["$"]["length"]); i < iLength; i++){
                             var obj = result.eshop[type + "s"][0][type][i],
                                 id = parseInt(obj["$"].id),
@@ -167,6 +167,9 @@ var samuraiTitleQueue = async.queue((input, callback) => {
     var info = {
         title_id: null
     };
+    
+    
+    
     console.log(input.language + " > " + input.eshop_id)
     var ninjaAttempts = 0;
     var samuraiAttempts = 0;
@@ -210,7 +213,7 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                 res.on('end', () => {
                     var parser = new xml2js.Parser();
                     parser.parseString(data, (err, result) => {
-                        if(err){
+                        if(err || result == null){
                             if(samuraiAttempts < 6){
                                 samuraiFetch(callback);
                             } else {
@@ -232,10 +235,12 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             info.publisher = parseInt(titleInfo.publisher[0]["$"].id);
                             info.banner_url = firstOrNone(titleInfo.banner_url);
                             info.icon_url = firstOrNone(titleInfo.icon_url);
+                            info.data_size = firstOrNone(titleInfo.data_size);
                             info.description = (() => {
                                 var desc = firstOrNone(titleInfo.description);
-                                if(desc != null)
-                                    return htmlToText.fromString(desc.replace(/\n/g, ""));
+                                if(desc != null){
+                                    return desc.replace(/\n/g, "").replace(/\<br[\/ ]*\>/gi, "\n");
+                                }
                                     
                                 if(desc == null)
                                     console.error("No Description: " + input.eshop_id);
@@ -252,7 +257,7 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             };
                             info.screenshots = [];
                             if(firstOrNone(titleInfo.screenshots)){
-                                console.log("screenshots");
+                                console.log(input.language + " > " + info.eshop_id + " > Screenshots");
                                 for(var x = 0; x < titleInfo.screenshots[0].screenshot.length; x++){
                                     var screenshot;
                                     var screenshotNodes = titleInfo.screenshots[0].screenshot[x];
@@ -305,8 +310,21 @@ var samuraiTitleQueue = async.queue((input, callback) => {
         
         if(!fs.existsSync(cwd + "/titles"))
             fs.mkdirSync(cwd + "/titles");
+            
+        var filename = cwd + "/titles/" + info.title_id.toLowerCase() + "-" + input.language.toLowerCase() + ".json";
         
-        fs.writeFileSync(cwd + "/titles/" + info.title_id.toLowerCase() + "-" + input.language.toLowerCase() + ".json", JSON.stringify(info, null, '\t'));
+        if(fs.existsSync(filename)){
+            var oldInfoData = fs.readFileSync(filename),
+                oldInfo = JSON.parse(oldInfoData);
+                
+            extend(oldInfo, info);
+            info = oldInfo;
+        }
+        
+        var infoJSON = JSON.stringify(info, null, '\t');
+        
+        if(infoJSON != oldInfoData)
+            fs.writeFileSync(filename, infoJSON);
         callback();
     })
 }, 60);
@@ -318,16 +336,41 @@ process.on('exit', function(){
     fs.writeFileSync(cwd + "/titles.json", JSON.stringify(titleIDs, null, '\t'));
     fs.writeFileSync(cwd + "/complete.json", JSON.stringify(titleData, null, '\t'));
     
+    var primaryLanguages = ["HK", "GB", "JP", "KR", "US"]
+    
     var titleIDList = Object.keys(titleIDs);
     for(var x = 0; x < titleIDList; x++){
         fs.writeFileSync(cwd + "/titles/" + titleIDList[x].toLowerCase() + ".json", JSON.stringify(titleData[titleIDList[x]], null, '\t'));
     }
+    var primaries = {};
+    for(var l = 0; l < primaryLanguages; l++)
+        primaries[primaryLanguages[l]] = {};
+        
+    var primariesForDevices = {};
+        for(var l = 0; l < primaryLanguages; l++)
+            primariesForDevices[primaryLanguages[l]] = {};
+        
     for(var x = 0; x < languages.length; x++){
         var output = {};
         for(var y = 0; y < titleIDList.length; y++){
             if(titleIDs[titleIDList[y]].languages.indexOf(languages[x]) != -1){
                 output[titleIDList[y]] = titleData[titleIDList[y]][languages[x]];
+                
+                if(primaryLanguages.indexOf(languages[x]) != -1){
+                    if(primaries[languages[x]] == undefined)
+                        primaries[languages[x]] = {};
+                        
+                    if(primariesForDevices[output[titleIDList[y]].platform_device] == undefined)
+                        primariesForDevices[output[titleIDList[y]].platform_device] = {};
+                        
+                    if(primariesForDevices[output[titleIDList[y]].platform_device][languages[x]] == undefined)
+                        primariesForDevices[output[titleIDList[y]].platform_device][languages[x]] = {};
+                        
+                    primaries[languages[x]][titleIDList[y]] = output[titleIDList[y]];
+                    primariesForDevices[output[titleIDList[y]].platform_device][languages[x]][titleIDList[y]] = output[titleIDList[y]];
+                }
             }
+            
         }
         if(Object.keys(output).length > 0)
             fs.writeFileSync(cwd + "/complete-" + languages[x].toLowerCase() + ".json", JSON.stringify(output, null, '\t'));
@@ -346,8 +389,12 @@ process.on('exit', function(){
                 fs.writeFileSync(cwd + "/complete-" + deviceTypes[y].toLowerCase() + "-" + languages[x].toLowerCase() + ".json", JSON.stringify(output2, null, '\t'));
         }
     }
+    
+    fs.writeFileSync(cwd + "/complete-regionprimaries.json", JSON.stringify(primaries, null, '\t'))
+    
     for(var x = 0; x < deviceTypes.length; x++){
         var output = {};
+            
         for(var y = 0; y < titleIDList.length; y++){
             var id = titleIDList[y];
             console.log(titleIDs[id].platform_device + " - " + deviceTypes[x]);
@@ -355,6 +402,9 @@ process.on('exit', function(){
                 output[id] = titleData[id];
             }
         }
+        
+        fs.writeFileSync(cwd + "/complete-" + deviceTypes[x].toLowerCase() + "-regionprimaries.json", JSON.stringify(primariesForDevices[deviceTypes[x]], null, '\t'));
+        
         console.log("/complete-" + deviceTypes[x].toLowerCase() + ".json");
         fs.writeFileSync(cwd + "/complete-" + deviceTypes[x].toLowerCase() + ".json", JSON.stringify(output, null, '\t'));
     }
