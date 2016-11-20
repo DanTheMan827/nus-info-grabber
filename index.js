@@ -343,12 +343,7 @@ process.on('exit', function(){
         fs.writeFileSync(cwd + "/titles/" + titleIDList[x].toLowerCase() + ".json", JSON.stringify(titleData[titleIDList[x]], null, '\t'));
     }
     var primaries = {};
-    for(var l = 0; l < primaryLanguages; l++)
-        primaries[primaryLanguages[l]] = {};
-        
     var primariesForDevices = {};
-        for(var l = 0; l < primaryLanguages; l++)
-            primariesForDevices[primaryLanguages[l]] = {};
         
     for(var x = 0; x < languages.length; x++){
         var output = {};
