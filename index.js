@@ -228,12 +228,14 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             info.product_code = firstOrNone(titleInfo.product_code);
                             info.name = firstOrNone(titleInfo.name);
                             info.platform = parseInt(titleInfo.platform[0]["$"].id);
+                            //info.platform_name = firstOrNone(titleInfo.platform[0].name);
                             info.platform_device = titleInfo.platform[0]["$"].device;
                             
                             if(deviceTypes.indexOf(info.platform_device) == -1)
                                 deviceTypes.push(info.platform_device);
                             
                             info.publisher = parseInt(titleInfo.publisher[0]["$"].id);
+                            //info.publisher_name = firstOrNone(titleInfo.publisher[0].name);
                             info.banner_url = firstOrNone(titleInfo.banner_url);
                             info.icon_url = firstOrNone(titleInfo.icon_url);
                             info.data_size = firstOrNone(titleInfo.data_size);
@@ -384,6 +386,11 @@ process.on('exit', function(){
             if(Object.keys(output2).length > 0)
                 fs.writeFileSync(cwd + "/complete-" + deviceTypes[y].toLowerCase() + "-" + languages[x].toLowerCase() + ".json", JSON.stringify(output2, null, '\t'));
         }
+    }
+    
+    for(var x = 0; x < titleIDList.length; x++){
+      var titleID = titleIDList[x];
+      fs.writeFileSync(cwd + "/titles/" + titleID.toLowerCase() + ".json", JSON.stringify(titleData[titleID], null, '\t'));
     }
     
     fs.writeFileSync(cwd + "/complete-regionprimaries.json", JSON.stringify(primaries, null, '\t'))
