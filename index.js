@@ -227,6 +227,9 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             info.eshop_id = input.eshop_id;
                             info.product_code = firstOrNone(titleInfo.product_code);
                             info.name = firstOrNone(titleInfo.name);
+                            if(info.name)
+                              info.name = info.name.replace(/(\n|<br[\/ ]*\>)/ig, " ").replace(/\s+/g, " ");
+                              
                             info.platform = parseInt(titleInfo.platform[0]["$"].id);
                             //info.platform_name = firstOrNone(titleInfo.platform[0].name);
                             info.platform_device = titleInfo.platform[0]["$"].device;
@@ -274,6 +277,36 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                                         screenshot = screenshotNodes.image_url[0]["_"];
                                     }
                                     info.screenshots.push(screenshot);
+                                }
+                            }
+                            info.movies = [];
+                            if(firstOrNone(titleInfo.movies)){
+                                console.log(input.language + " > " + info.eshop_id + " > Movies");
+                                for(var x = 0; x < titleInfo.movies[0].movie.length; x++){
+                                    
+                                    var movieNodes = titleInfo.movies[0].movie[x];
+                                    var movie = {
+                                      banner_url: firstOrNone(movieNodes.banner_url),
+                                      name: firstOrNone(movieNodes.name),
+                                      files: []
+                                    };
+                                    
+                                    if(movie.name)
+                                      movie.name = movie.name.replace(/(\n|<br[\/ ]*\>)/ig, " ").replace(/\s+/g, " ");
+                                    
+                                    for(var y = 0; y < movieNodes.files[0].file.length; y++){
+                                      var file = movieNodes.files[0].file[y];
+                                      movie.files.push({
+                                        quality: file["$"].quality,
+                                        format: firstOrNone(file.format),
+                                        movie_url: firstOrNone(file.movie_url),
+                                        width: firstOrNone(file.width),
+                                        height: firstOrNone(file.height),
+                                        dimension: firstOrNone(file.dimension),
+                                        play_time_sec: firstOrNone(file.play_time_sec)
+                                      })
+                                    }
+                                    info.movies.push(movie);
                                 }
                             }
                             
