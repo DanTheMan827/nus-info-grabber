@@ -8,6 +8,9 @@
     "type": "git",
     "url": "git+https://github.com/DanTheMan827/nus-info-grabber.git"
   },
+  "bin": {
+    "nus-info-grabber": "./index.js"
+  },
   "keywords": [
     "Nintendo",
     "NUS",
