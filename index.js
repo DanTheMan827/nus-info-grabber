@@ -1,5 +1,8 @@
-#!/usr/bin/env node
+#!/usr/bin/env echo --max-old-space-size=8096
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+require('v8').setFlagsFromString('--max_old_space_size=8096');
+require('object.values').shim();
 
 const http = require("http"),
       https = require("https"),
@@ -20,10 +23,12 @@ const http = require("http"),
 
 var languages = [],
     titleIDs = parseJsonFile(cwd + "/titles.json") || {},
+    eShopUIDs = parseJsonFile(cwd + "/eshopuid.json") || {},
     titleData = parseJsonFile(cwd + "/complete.json") || {},
     deviceTypes = [],
     publishers = parseJsonFile(cwd + "/publishers.json") || {},
-    platforms = parseJsonFile(cwd + "/platforms.json") || {};
+    platforms = parseJsonFile(cwd + "/platforms.json") || {},
+    foundeShopUIDs = [];
 
 function parseJsonFile(path){
     if(fs.existsSync(path)){
@@ -41,7 +46,7 @@ function firstOrNone(input){
 }
 
 function getNinjaURL(path, callback){
-    https.request({
+    var req = https.request({
         key: ctrCommonCert.key,
         cert: ctrCommonCert.cert,
         rejectUnauthorized: false,
@@ -59,12 +64,15 @@ function getNinjaURL(path, callback){
             callback(data, null);
         });
     }).on('error', (error) => {
-        callback(null, error);
-    }).end();
+        getNinjaURL(path, callback);
+        //callback(null, error);
+    });
+	req.shouldKeepAlive = false;
+	req.end();
 }
 
 var langDiscQueue = async.queue((lang, callback) => {
-    https.get("https://samurai.wup.shop.nintendo.net/samurai/ws/" + lang + "/titles?limit=9999999", (res) => {
+    var req = https.get("https://samurai.wup.shop.nintendo.net/samurai/ws/" + lang + "/titles?limit=9999999", (res) => {
         var data = ''
         res.on('data', (d) => {
             data += d;
@@ -86,20 +94,41 @@ var langDiscQueue = async.queue((lang, callback) => {
                 callback();
             }
         })
-    }).on('error', callback).end();
+    }).on('error', () => {
+        langDiscQueue.push(lang);
+        callback();
+    });
+	req.shouldKeepAlive = false;
+	req.end();
 }, 10);
 
-//langDiscQueue.pause();
+langDiscQueue.pause();
 for(var x = 0; x < abc.length; x++){
     for(var y = 0; y < abc.length; y++){
         langDiscQueue.push(abc[x] + abc[y]);
     }
 }
-//langDiscQueue.resume();
+langDiscQueue.drain = () => {
+    var IDs = Object.values(eShopUIDs);
+    
+    for(var x = 0; x < IDs.length; x++){
+        if(foundeShopUIDs.indexOf(IDs[x]) == -1){
+            for(var y = 0; y < languages.length; y++){
+                samuraiTitleQueue.push({
+                    language: languages[y],
+                    eshop_id: IDs[x]
+                });
+                console.log("Pushed " + IDs[x] + " > " + languages[y]);
+            }
+        }
+    }
+    samuraiTitleQueue.resume();
+};
+langDiscQueue.resume();
 
 function handleSamuraiPublisherPlatformList(lang, type){
     //https://samurai.ctr.shop.nintendo.net/samurai/ws/JP/publishers/?shop_id=2
-    https.get("https://samurai.ctr.shop.nintendo.net/samurai/ws/" + lang + "/" + type + "s/?shop_id=2", (res) => {
+    var req = https.get("https://samurai.ctr.shop.nintendo.net/samurai/ws/" + lang + "/" + type + "s/?shop_id=2", (res) => {
         var data = ''
         res.on('data', (d) => {
             data += d;
@@ -144,7 +173,13 @@ function handleSamuraiPublisherPlatformList(lang, type){
                 });
             }
         })
-    }).end();
+        
+        
+    }).on('error', () => {
+        handleSamuraiPublisherPlatformList(lang, type);
+    });
+	req.shouldKeepAlive = false;
+	req.end();
 }
 
 function handleSamuraiListXML(lang, result, callback){
@@ -155,6 +190,9 @@ function handleSamuraiListXML(lang, result, callback){
         languages.push(lang);
         for(var i = 0; i < contents.length; i++){
             titleInfo = contents[i].title[0];
+            if(foundeShopUIDs.indexOf(titleInfo["$"].id) == -1){
+                foundeShopUIDs.push(titleInfo["$"].id);
+            }
             samuraiTitleQueue.push({
                 language: lang,
                 eshop_id: titleInfo["$"].id
@@ -180,13 +218,17 @@ var samuraiTitleQueue = async.queue((input, callback) => {
             var ninjaFetch = arguments.callee;
             
             // get ninja info
-            getNinjaURL("/ninja/ws/US/title/" + input.eshop_id + "/ec_info", (data, error) => {
+            getNinjaURL("/ninja/ws/" + input.language + "/title/" + input.eshop_id + "/ec_info", (data, error) => {
                 ninjaAttempts++;
                 if(error == null){
                     var parser = new xml2js.Parser();
                     parser.parseString(data, (err, result) => {
                         if(!err){
-                            info.title_id = result.eshop.title_ec_info[0].title_id[0];
+                            if(result == undefined || result.eshop == undefined || result.eshop.title_ec_info == undefined || result.eshop.title_ec_info[0].title_id == undefined){
+                                
+                            } else {
+                                info.title_id = result.eshop.title_ec_info[0].title_id[0];
+                            }
                         } else {
                             console.error(err);
                         }
@@ -204,7 +246,7 @@ var samuraiTitleQueue = async.queue((input, callback) => {
         },
         function(callback){
             var samuraiFetch = arguments.callee;
-            https.get("https://samurai.ctr.shop.nintendo.net/samurai/ws/" + input.language + "/title/" + input.eshop_id + "/?shop_id=2", (res) => {
+            var req = https.get("https://samurai.ctr.shop.nintendo.net/samurai/ws/" + input.language + "/title/" + input.eshop_id + "/?shop_id=2", (res) => {
                 samuraiAttempts++;
                 var data = '';
                 res.on('data', (d) => {
@@ -223,6 +265,11 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             
                         } else {
                             var titleInfo = firstOrNone(result.eshop.title)
+                            
+                            if(titleInfo == null){
+                                callback();
+                                return;
+                            }
                             
                             info.eshop_id = input.eshop_id;
                             info.product_code = firstOrNone(titleInfo.product_code);
@@ -245,7 +292,7 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                             info.description = (() => {
                                 var desc = firstOrNone(titleInfo.description);
                                 if(desc != null){
-                                    return desc.replace(/\n/g, "").replace(/\<br[\/ ]*\>/gi, "\n");
+                                    return desc.replace(/\n/g, " ").replace(/\<br[\/ ]*\>/gi, "\n").replace(/\s+/g, " ");
                                 }
                                     
                                 if(desc == null)
@@ -320,11 +367,16 @@ var samuraiTitleQueue = async.queue((input, callback) => {
                 } else {
                     callback(err);
                 }
-            }).end();
+            });
+			req.shouldKeepAlive = false;
+			req.end();
         }
     ], () => {
         if(info.title_id != null){
             if(titleIDs[info.title_id] == null){
+                if(Object.keys(eShopUIDs).indexOf(info.title_id) == -1){
+                    eShopUIDs[info.title_id] = info.eshop_id; 
+                }
                 titleIDs[info.title_id] = {
                     title_id: info.title_id,
                     product_code: info.product_code,
@@ -336,41 +388,26 @@ var samuraiTitleQueue = async.queue((input, callback) => {
             if(titleIDs[info.title_id].languages.indexOf(input.language) == -1){
                 titleIDs[info.title_id].languages.push(input.language)
             }
-        }
-        
-        if(titleData[info.title_id] == null){
-            titleData[info.title_id] = {};
-        }
-        
-        titleData[info.title_id][input.language] = info;
-        
-        if(!fs.existsSync(cwd + "/titles"))
-            fs.mkdirSync(cwd + "/titles");
             
-        var filename = cwd + "/titles/" + info.title_id.toLowerCase() + "-" + input.language.toLowerCase() + ".json";
-        
-        if(fs.existsSync(filename)){
-            var oldInfoData = fs.readFileSync(filename),
-                oldInfo = JSON.parse(oldInfoData);
-                
-            extend(oldInfo, info);
-            info = oldInfo;
+            
+            if(titleData[info.title_id] == null){
+                titleData[info.title_id] = {};
+            }
+            
+            titleData[info.title_id][input.language] = info;
         }
         
-        var infoJSON = JSON.stringify(info, null, '\t');
-        
-        if(infoJSON != oldInfoData)
-            fs.writeFileSync(filename, infoJSON);
         callback();
     })
 }, 60);
-//samuraiTitleQueue.pause();
+samuraiTitleQueue.pause();
 
 process.on('exit', function(){
     fs.writeFileSync(cwd + "/publishers.json", JSON.stringify(publishers, null, '\t'));
     fs.writeFileSync(cwd + "/platforms.json", JSON.stringify(platforms, null, '\t'));
     fs.writeFileSync(cwd + "/titles.json", JSON.stringify(titleIDs, null, '\t'));
     fs.writeFileSync(cwd + "/complete.json", JSON.stringify(titleData, null, '\t'));
+    fs.writeFileSync(cwd + "/eshopuid.json", JSON.stringify(eShopUIDs, null, '\t'));
     
     var primaryLanguages = ["HK", "GB", "JP", "KR", "US"]
     
@@ -378,14 +415,42 @@ process.on('exit', function(){
     for(var x = 0; x < titleIDList; x++){
         fs.writeFileSync(cwd + "/titles/" + titleIDList[x].toLowerCase() + ".json", JSON.stringify(titleData[titleIDList[x]], null, '\t'));
     }
+    
+    var gameTitles = {}
     var primaries = {};
     var primariesForDevices = {};
+    
+    if(!fs.existsSync(cwd + "/titles"))
+        fs.mkdirSync(cwd + "/titles");
         
+    
     for(var x = 0; x < languages.length; x++){
         var output = {};
         for(var y = 0; y < titleIDList.length; y++){
+                
             if(titleIDs[titleIDList[y]].languages.indexOf(languages[x]) != -1){
+                
+                var filename = cwd + "/titles/" + titleIDList[y].toLowerCase() + "-" + languages[x].toLowerCase() + ".json";
+                var info = titleData[titleIDList[y]][languages[x]];
+                if(fs.existsSync(filename)){
+                    var oldInfoData = fs.readFileSync(filename),
+                        oldInfo = JSON.parse(oldInfoData);
+                        
+                    extend(oldInfo, info);
+                    info = oldInfo;
+                }
+                
+                var infoJSON = JSON.stringify(info, null, '\t');
+                
+                if(infoJSON != oldInfoData)
+                    fs.writeFileSync(filename, infoJSON);
+                
                 output[titleIDList[y]] = titleData[titleIDList[y]][languages[x]];
+                
+                if(gameTitles[titleIDList[y]] == undefined)
+                    gameTitles[titleIDList[y]] = {};
+                
+                gameTitles[titleIDList[y]][languages[x]] = titleData[titleIDList[y]][languages[x]].name;
                 
                 if(primaryLanguages.indexOf(languages[x]) != -1){
                     if(primaries[languages[x]] == undefined)
@@ -421,9 +486,11 @@ process.on('exit', function(){
         }
     }
     
+    fs.writeFileSync(cwd + "/title-names.json", JSON.stringify(gameTitles, null, '\t'))
+    
     for(var x = 0; x < titleIDList.length; x++){
-      var titleID = titleIDList[x];
-      fs.writeFileSync(cwd + "/titles/" + titleID.toLowerCase() + ".json", JSON.stringify(titleData[titleID], null, '\t'));
+        var titleID = titleIDList[x];
+        fs.writeFileSync(cwd + "/titles/" + titleID.toLowerCase() + ".json", JSON.stringify(titleData[titleID], null, '\t'));
     }
     
     fs.writeFileSync(cwd + "/complete-regionprimaries.json", JSON.stringify(primaries, null, '\t'))
